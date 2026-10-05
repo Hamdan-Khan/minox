@@ -1,4 +1,5 @@
-use std::fmt::Debug;
+#![allow(dead_code)]
+use std::{array::from_fn, fmt::Debug};
 
 #[derive(Copy, Clone)]
 struct Bit(bool);
@@ -15,53 +16,70 @@ impl Bit {
     // of the box, but to build upon the concept of deriving gates from
     // the basic NAND gate, we will use it as a building block to creat every
     // other gate.
-    fn nand(&self, right: &Self) -> Self {
+    fn nand(self, right: Self) -> Self {
         Bit(!(self.0 & right.0))
     }
 
-    fn not(&self) -> Self {
+    fn not(self) -> Self {
         self.nand(self)
     }
 
-    fn and(&self, right: &Self) -> Self {
+    fn and(self, right: Self) -> Self {
         Bit(!self.nand(right).0)
     }
 
-    fn or(&self, right: &Self) -> Self {
+    fn or(self, right: Self) -> Self {
         let not_left = self.not();
-        let ands = not_left.and(&right.not());
+        let ands = not_left.and(right.not());
         ands.not()
     }
+
+    fn xor(self, right: Self) -> Self {
+        let not_left = self.not();
+        let not_right = right.not();
+        not_left.and(right).or(self.and(not_right))
+    }
 }
 
-struct Byte([Bit; 8]);
+struct Word([Bit; 16]);
 
-impl Byte {
+impl Word {
     fn new() -> Self {
-        Byte([
-            Bit(false),
-            Bit(false),
-            Bit(false),
-            Bit(false),
-            Bit(false),
-            Bit(false),
-            Bit(false),
-            Bit(false),
-        ])
+        Word(from_fn(|_i| Bit(false)))
     }
 
-    fn from_int(bin: u8) -> Self {
-        let bits = std::array::from_fn(|i| Bit((bin & (1 << (7 - i))) != 0));
-        Byte(bits)
+    fn from_int(bin: u16) -> Self {
+        let bits = from_fn(|i| Bit((bin & (1 << (15 - i))) != 0));
+        Word(bits)
+    }
+
+    fn not(self) -> Self {
+        let bits = from_fn(|i| self.0[i].not());
+        Word(bits)
+    }
+
+    fn and(self, right: Self) -> Self {
+        let bits = from_fn(|i| self.0[i].and(right.0[i]));
+        Word(bits)
+    }
+
+    fn or(self, right: Self) -> Self {
+        let bits = from_fn(|i| self.0[i].or(right.0[i]));
+        Word(bits)
+    }
+
+    fn xor(self, right: Self) -> Self {
+        let bits = from_fn(|i| self.0[i].xor(right.0[i]));
+        Word(bits)
     }
 }
 
-impl Debug for Byte {
+impl Debug for Word {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let res = self
             .0
             .iter()
-            .fold(0, |acc, &bit| (acc << 1) | (bit.0 as u8));
+            .fold(0, |acc, &bit| (acc << 1) | (bit.0 as u16));
         f.write_fmt(format_args!("{:08b}", res))
     }
 }
@@ -69,7 +87,12 @@ impl Debug for Byte {
 fn main() {
     let one = Bit(true);
     let zero = Bit(false);
-    let byte = Byte::from_int(0b_0000_1000);
-    println!("{:?}", one.nand(&zero));
-    println!("{:?}", byte);
+    let byte1 = Word::from_int(0b_1000_1000_0000_1000);
+    let byte2 = Word::from_int(0b_1000_1000_0000_1000);
+    let byte3 = Word::new();
+    println!("{:?}", one.nand(zero));
+    println!("byte1: {:?}", byte1);
+    println!("byte2: {:?}", byte2);
+    println!("b1 and b2: {:?}", byte1.and(byte2));
+    println!("not b3: {:?}", byte3.not());
 }
