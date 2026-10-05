@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use std::{array::from_fn, fmt::Debug};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 struct Bit(bool);
 
 impl Debug for Bit {
@@ -39,8 +39,18 @@ impl Bit {
         let not_right = right.not();
         not_left.and(right).or(self.and(not_right))
     }
+
+    // result will be an enum of sum and carry bits i.e. (sum , carry)
+    fn full_adder(self, second: Self, third: Self) -> (Self, Self) {
+        // sum can be calculated using a XOR b XOR c
+        let sum = self.xor(second).xor(third);
+        // any two bits need to be 1, for a carry bit to be one:
+        let carry = self.and(second).or(self.and(third)).or(second.and(third));
+        (sum, carry)
+    }
 }
 
+#[derive(PartialEq)]
 struct Word([Bit; 16]);
 
 impl Word {
@@ -72,6 +82,22 @@ impl Word {
         let bits = from_fn(|i| self.0[i].xor(right.0[i]));
         Word(bits)
     }
+
+    fn full_adder(self, right: Self) -> Self {
+        // initially carry bit will be zero
+        let mut carry_bit = Bit(false);
+        let mut bits = [Bit(false); 16];
+
+        // starting with index 15 because we want to start the addition with the
+        // least significant bits i.e. the right most bits
+        for i in (0..16).rev() {
+            let (sum, carry) = self.0[i].full_adder(right.0[i], carry_bit);
+            bits[i] = sum;
+            carry_bit = carry;
+        }
+
+        Word(bits)
+    }
 }
 
 impl Debug for Word {
@@ -80,7 +106,7 @@ impl Debug for Word {
             .0
             .iter()
             .fold(0, |acc, &bit| (acc << 1) | (bit.0 as u16));
-        f.write_fmt(format_args!("{:08b}", res))
+        f.write_fmt(format_args!("{:16b}", res))
     }
 }
 
@@ -95,4 +121,14 @@ fn main() {
     println!("byte2: {:?}", byte2);
     println!("b1 and b2: {:?}", byte1.and(byte2));
     println!("not b3: {:?}", byte3.not());
+}
+
+#[test]
+fn adder_tests() {
+    let word1 = Word::from_int(0b_0000_1111_1010_1011);
+    let word2 = Word::from_int(0b_0000_1000_0101_0100);
+    assert_eq!(
+        word1.full_adder(word2),
+        Word::from_int(0b_0001_0111_1111_1111)
+    );
 }
