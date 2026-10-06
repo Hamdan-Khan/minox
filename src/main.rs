@@ -40,6 +40,12 @@ impl Bit {
         not_left.and(right).or(self.and(not_right))
     }
 
+    fn mux(a: Self, b: Self, sel: Self) -> Self {
+        let a_and_not_sel = sel.not().and(a);
+        let b_and_sel = b.and(sel);
+        a_and_not_sel.or(b_and_sel)
+    }
+
     // result will be an enum of sum and carry bits i.e. (sum , carry)
     fn full_adder(self, second: Self, third: Self) -> (Self, Self) {
         // sum can be calculated using a XOR b XOR c
@@ -159,6 +165,55 @@ impl DLatch {
     }
 }
 
+struct DFlipFlop {
+    master_latch: DLatch,
+    slave_latch: DLatch,
+}
+
+impl DFlipFlop {
+    fn new() -> Self {
+        Self {
+            master_latch: DLatch::new(),
+            slave_latch: DLatch::new(),
+        }
+    }
+
+    fn step(&mut self, d: Bit, clk: Bit) {
+        // rising edge, because master latch is enabled on low signal
+        // (when clock signal is about to rise)
+        self.master_latch.step(d, clk.not());
+        let q_m = self.master_latch.output();
+        self.slave_latch.step(q_m, clk);
+    }
+
+    fn output(&self) -> Bit {
+        self.slave_latch.output()
+    }
+}
+
+// unlike a plain d flip flop, that only remembers a data bit for one clock
+// cycle, a bit register will indefinitely remember the data using a loop + mux
+struct BitRegister {
+    bit: DFlipFlop,
+}
+
+impl BitRegister {
+    fn new() -> Self {
+        Self {
+            bit: DFlipFlop::new(),
+        }
+    }
+
+    fn step(&mut self, d: Bit, load: Bit, clk: Bit) {
+        let inp = Bit::mux(self.bit.output(), d, load);
+        self.bit.step(inp, clk);
+    }
+
+    fn output(&self) -> Bit {
+        self.bit.output()
+    }
+}
+
 fn main() {
     let one = Bit(true);
     let zero = Bit(false);
@@ -173,10 +228,31 @@ fn main() {
     println!("not b3: {:?}", byte3.not());
 
     let mut clock = Clock::new();
+    let mut dff_bit = DFlipFlop::new();
+    let mut register_bit = BitRegister::new();
     // 10 full cycles
-    for _ in 0..20 {
+    for i in 0..20 {
         clock.toggle();
-        println!("clock signal: {:?}", clock.level());
+        let clk = clock.level();
+        // the previous q passed as data means: the output of
+        let prev_memory = dff_bit.output();
+        // at 4th cycle, the clock signal is low so master captures it and
+        // in the 5th cycle when the clock signal is high, slave latch captures and stores it
+        if i == 3 {
+            dff_bit.step(one, clk);
+            register_bit.step(one, one, clk);
+        } else {
+            dff_bit.step(prev_memory, clk);
+            // because load is zero, the data bit doesn't matter aka register stores the previous data bit
+            register_bit.step(zero, zero, clk);
+        }
+
+        println!(
+            "clock signal: {:?}, dff: {:?}, register: {:?}",
+            clock.level(),
+            dff_bit.output(),
+            register_bit.output()
+        );
     }
 }
 
