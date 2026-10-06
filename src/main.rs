@@ -51,15 +51,15 @@ impl Bit {
 }
 
 #[derive(PartialEq)]
-struct Word([Bit; 16]);
+struct Word([Bit; 32]);
 
 impl Word {
     fn new() -> Self {
         Word(from_fn(|_i| Bit(false)))
     }
 
-    fn from_int(bin: u16) -> Self {
-        let bits = from_fn(|i| Bit((bin & (1 << (15 - i))) != 0));
+    fn from_int(bin: u32) -> Self {
+        let bits = from_fn(|i| Bit((bin >> (31 - i)) & 1 != 0));
         Word(bits)
     }
 
@@ -86,11 +86,11 @@ impl Word {
     fn full_adder(self, right: Self) -> Self {
         // initially carry bit will be zero
         let mut carry_bit = Bit(false);
-        let mut bits = [Bit(false); 16];
+        let mut bits = [Bit(false); 32];
 
-        // starting with index 15 because we want to start the addition with the
+        // starting with index 31 because we want to start the addition with the
         // least significant bits i.e. the right most bits
-        for i in (0..16).rev() {
+        for i in (0..32).rev() {
             let (sum, carry) = self.0[i].full_adder(right.0[i], carry_bit);
             bits[i] = sum;
             carry_bit = carry;
@@ -105,8 +105,57 @@ impl Debug for Word {
         let res = self
             .0
             .iter()
-            .fold(0, |acc, &bit| (acc << 1) | (bit.0 as u16));
-        f.write_fmt(format_args!("{:16b}", res))
+            .fold(0, |acc, &bit| (acc << 1) | (bit.0 as u32));
+        f.write_fmt(format_args!("{:032b}", res))
+    }
+}
+
+struct Clock {
+    signal: Bit,
+}
+
+impl Clock {
+    fn new() -> Self {
+        Self { signal: Bit(false) }
+    }
+
+    fn toggle(&mut self) {
+        self.signal = self.signal.not();
+    }
+
+    fn level(&self) -> Bit {
+        self.signal
+    }
+}
+
+struct DLatch {
+    q: Bit,
+}
+
+impl DLatch {
+    fn new() -> Self {
+        Self { q: Bit(false) }
+    }
+
+    // simulating an SR latch with clock (enable) and data bit inputs
+    fn step(&mut self, d: Bit, clk: Bit) {
+        let s = d.nand(clk);
+        let r = d.not().nand(clk);
+
+        let mut q = self.q;
+        let mut qb = q.not();
+        // cross coupled nands will settle in two passes
+        for _ in 0..2 {
+            let q_next = s.nand(qb);
+            let qb_next = r.nand(q);
+            q = q_next;
+            qb = qb_next;
+        }
+        self.q = q;
+    }
+
+    fn output(&self) -> Bit {
+        self.q
     }
 }
 
@@ -120,8 +169,22 @@ fn main() {
     println!("byte1: {:?}", byte1);
     println!("byte2: {:?}", byte2);
     println!("b1 and b2: {:?}", byte1.and(byte2));
+    println!("byte3: {:?}", byte3);
     println!("not b3: {:?}", byte3.not());
+
+    let mut clock = Clock::new();
+    // 10 full cycles
+    for _ in 0..20 {
+        clock.toggle();
+        println!("clock signal: {:?}", clock.level());
+    }
 }
+
+#[cfg(test)]
+mod gate_truth_tables;
+
+#[cfg(test)]
+mod memory_tests;
 
 #[test]
 fn adder_tests() {
