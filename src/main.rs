@@ -56,7 +56,7 @@ impl Bit {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 struct Word([Bit; 32]);
 
 impl Word {
@@ -211,6 +211,28 @@ impl BitRegister {
 
     fn output(&self) -> Bit {
         self.bit.output()
+    }
+}
+
+struct WordRegister {
+    bit_registers: [BitRegister; 32],
+}
+
+impl WordRegister {
+    fn new() -> Self {
+        Self {
+            bit_registers: from_fn(|_| BitRegister::new()),
+        }
+    }
+
+    fn step(&mut self, d: Word, load: Bit, clk: Bit) {
+        for (i, b) in self.bit_registers.iter_mut().enumerate() {
+            b.step(d.0[i], load, clk);
+        }
+    }
+
+    fn output(&self) -> Word {
+        Word(from_fn(|i| self.bit_registers[i].output()))
     }
 }
 
