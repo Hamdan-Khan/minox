@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 use std::{array::from_fn, fmt::Debug};
 
+use rustc_hash::FxHashMap;
+
 #[derive(Copy, Clone, PartialEq)]
 struct Bit(bool);
 
@@ -54,6 +56,10 @@ impl Bit {
         let carry = self.and(second).or(self.and(third)).or(second.and(third));
         (sum, carry)
     }
+
+    fn to_int(self) -> u8 {
+        if self.0 { 1 } else { 0 }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -67,6 +73,12 @@ impl Word {
     fn from_int(bin: u32) -> Self {
         let bits = from_fn(|i| Bit((bin >> (31 - i)) & 1 != 0));
         Word(bits)
+    }
+
+    fn to_int(self) -> u32 {
+        self.0
+            .iter()
+            .fold(0, |acc, &bit| (acc << 1) | (bit.0 as u32))
     }
 
     fn not(self) -> Self {
@@ -89,9 +101,10 @@ impl Word {
         Word(bits)
     }
 
-    fn full_adder(self, right: Self) -> Self {
-        // initially carry bit will be zero
-        let mut carry_bit = Bit(false);
+    fn full_adder(self, right: Self, carry_in: Bit) -> (Self, Bit) {
+        // for subtraction, the initial carry bit is 1 i.e.
+        // A + (~B) + 1
+        let mut carry_bit = carry_in;
         let mut bits = [Bit(false); 32];
 
         // starting with index 31 because we want to start the addition with the
@@ -102,16 +115,13 @@ impl Word {
             carry_bit = carry;
         }
 
-        Word(bits)
+        (Word(bits), carry_bit)
     }
 }
 
 impl Debug for Word {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let res = self
-            .0
-            .iter()
-            .fold(0, |acc, &bit| (acc << 1) | (bit.0 as u32));
+        let res = self.to_int();
         f.write_fmt(format_args!("{:032b}", res))
     }
 }
@@ -236,7 +246,85 @@ impl WordRegister {
     }
 }
 
+// in riscv, the regfile consists of 32 registers with a 5-bit address space
+struct RegFile {
+    registers: [WordRegister; 32],
+}
+
+impl RegFile {
+    fn new() -> Self {
+        Self {
+            registers: from_fn(|_| WordRegister::new()),
+        }
+    }
+}
+
+struct ProgramCounter(WordRegister);
+
+impl ProgramCounter {
+    fn new() -> Self {
+        // points to 0 address initially
+        Self(WordRegister::new())
+    }
+
+    fn step(&self) -> Word {
+        self.0.output()
+    }
+}
+
+// ideally an L1 cache inside the processor, but we'll address it using 32-bits and
+// treat it as a RAM because in this simulation, because the overhead for accessing instructions
+// from the RAM and L1 cache would be the same.
+struct InstructionMemory {
+    // using `Word` or `WordRegister` is not relevant here since we're not concerned with
+    // how the hardware of a RAM works, so choosing the simplest storage way I can think of
+    instructions: FxHashMap<u32, u32>,
+}
+
+impl InstructionMemory {
+    fn new() -> Self {
+        let mut map = FxHashMap::default();
+        map.insert(0, 0);
+        Self { instructions: map }
+    }
+
+    fn step(&self, addr: Word) -> Word {
+        match self.instructions.get(&addr.to_int()) {
+            Some(&instruction) => Word::from_int(instruction),
+            None => Word::new(),
+        }
+    }
+}
+
+// helper to extract bits from a word (can think of it as routing wires)
+fn bits<const START: usize, const LEN: usize>(w: Word) -> [Bit; LEN] {
+    from_fn(|i| w.0[START + i])
+}
+
+// fetch, decode, execute
+fn fde() {
+    let instruction_memory = InstructionMemory::new();
+    let program_counter = ProgramCounter::new();
+    let mut clock = Clock::new();
+
+    for _i in 0..20 {
+        clock.toggle();
+        let clk = clock.level();
+
+        // get the address from the program counter output and fetch the
+        // instruction from the inst memory
+        let pc_output = program_counter.0.output();
+        let instruction = instruction_memory.step(pc_output);
+
+        // since the bits in the instruction word are ordered MSB (left) to LSB (right),
+        // the indexing to extract bits would be opposite i.e. 25 as start index insted
+        // of 0 for the opcode
+        let op_code = bits::<25, 7>(instruction);
+    }
+}
+
 fn main() {
+    fde();
     let one = Bit(true);
     let zero = Bit(false);
     let byte1 = Word::from_int(0b_1000_1000_0000_1000);
@@ -289,7 +377,7 @@ fn adder_tests() {
     let word1 = Word::from_int(0b_0000_1111_1010_1011);
     let word2 = Word::from_int(0b_0000_1000_0101_0100);
     assert_eq!(
-        word1.full_adder(word2),
+        word1.full_adder(word2, Bit(false)).0,
         Word::from_int(0b_0001_0111_1111_1111)
     );
 }
